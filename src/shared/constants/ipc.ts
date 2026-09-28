@@ -1,0 +1,20 @@
+export const IPC_CHANNELS = {
+  SYSTEM_GET_HEALTH: 'system:get-health',
+  SYSTEM_OPEN_EXTERNAL: 'system:open-external',
+  DASHBOARD_GET_STATS: 'dashboard:get-stats',
+  META_GET_CONNECTION_STATUS: 'meta:get-connection-status',
+  META_SAVE_DEVELOPMENT_TOKEN: 'meta:save-development-token',
+  META_DISCONNECT: 'meta:disconnect',
+  META_TEST_CONNECTION: 'meta:test-connection',
+  META_GET_ACCESSIBLE_PAGES: 'meta:get-accessible-pages',
+  META_IMPORT_PAGE: 'meta:import-page',
+  META_SYNC_PAGE: 'meta:sync-page',
+  PAGES_LIST: 'pages:list',
+  POSTS_LIST: 'posts:list',
+  COMMENTS_LIST: 'comments:list',
+  LEADS_LIST: 'leads:list',
+  LEADS_UPDATE_STATUS: 'leads:update-status',
+  LEADS_UPDATE_DETAILS: 'leads:update-details',
+  LEADS_EXPORT_CSV: 'leads:export-csv',
+  REPORTS_GET_SUMMARY: 'reports:get-summary'
+} as const;

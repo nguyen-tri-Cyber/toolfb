@@ -1,0 +1,12 @@
+node_modules/
+dist/
+out/
+.electron-dev/
+src/renderer/dist/
+
+.env
+.env.*
+!.env.example
+
+*.tsbuildinfo
+npm-debug.log*
