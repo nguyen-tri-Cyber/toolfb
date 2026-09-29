@@ -25,6 +25,10 @@ const PAGE_ACCESS_TOKEN_FIELDS = 'id,access_token';
 const PAGE_POST_FIELDS =
   'id,message,status_type,permalink_url,created_time,reactions.limit(0).summary(true),comments.limit(0).summary(true),shares';
 const POST_COMMENT_FIELDS = 'id,message,created_time,from,like_count,parent';
+const graphIdentitySchema = z.object({ id: z.string().min(1), name: z.string().min(1) });
+const graphPermissionsSchema = z.object({
+  data: z.array(z.object({ permission: z.string(), status: z.string() }))
+});
 
 export interface MetaGraphApiClientOptions {
   version?: string;
@@ -60,31 +64,56 @@ export class MetaGraphApiClient {
     return normalizeAccessiblePagesResponse(response, importedPageIds);
   }
 
+  async getIdentity(token: string, options: { signal?: AbortSignal } = {}): Promise<{ id: string; name: string }> {
+    return this.request('/me', token, { fields: 'id,name' }, graphIdentitySchema, options.signal);
+  }
+
+  async getGrantedPermissions(token: string): Promise<string[]> {
+    const response = await this.request('/me/permissions', token, {}, graphPermissionsSchema);
+    return response.data.filter((item) => item.status === 'granted').map((item) => item.permission);
+  }
+
   async getPageDetails(token: string, pageId: string): Promise<FacebookPageDetails> {
     const response = await this.request(`/${pageId}`, token, { fields: PAGE_DETAIL_FIELDS }, graphPageDetailsResponseSchema);
     return normalizeGraphPage(response);
   }
 
-  async getPageAccessToken(userToken: string, pageId: string): Promise<string> {
-    const response = await this.request(
-      '/me/accounts',
-      userToken,
-      { fields: PAGE_ACCESS_TOKEN_FIELDS },
-      graphPageAccessTokensResponseSchema
-    );
-    const page = response.data.find((item) => item.id === pageId);
+  async getPageAccessToken(userToken: string, pageId: string, options: { signal?: AbortSignal } = {}): Promise<string> {
+    try {
+      const response = await this.request(
+        '/me/accounts',
+        userToken,
+        { fields: PAGE_ACCESS_TOKEN_FIELDS },
+        graphPageAccessTokensResponseSchema,
+        options.signal
+      );
+      const page = response.data.find((item) => item.id === pageId);
 
-    if (!page?.access_token) {
-      throw new MetaError('META_PERMISSION_DENIED', 'Page access token is unavailable.');
+      if (page?.access_token) {
+        return page.access_token;
+      }
+    } catch {
+      if (options.signal?.aborted) throw new MetaError('SYNC_CANCELLED', 'Page synchronization cancelled.');
+      // /me/accounts may fail if userToken is already a Page Access Token
     }
 
-    return page.access_token;
+    try {
+      const identity = await this.getIdentity(userToken, options);
+      if (identity.id === pageId) {
+        return userToken;
+      }
+    } catch {
+      if (options.signal?.aborted) throw new MetaError('SYNC_CANCELLED', 'Page synchronization cancelled.');
+      // ignore
+    }
+
+    throw new MetaError('META_PERMISSION_DENIED', 'Page access token is unavailable.');
   }
 
   async getPagePosts(
     pageToken: string,
     pageId: string,
-    options: { since?: string; maxPages?: number } = {}
+    options: { since?: string; maxPages?: number; signal?: AbortSignal } = {}
   ): Promise<FacebookPostDetails[]> {
     const posts: FacebookPostDetails[] = [];
     const seenCursors = new Set<string>();
@@ -101,12 +130,16 @@ export class MetaGraphApiClient {
           ...(options.since ? { since: options.since } : {}),
           ...(after ? { after } : {})
         },
-        graphPostsResponseSchema
+        graphPostsResponseSchema,
+        options.signal
       );
       posts.push(...response.data.map(normalizeGraphPost));
 
       const next = response.paging?.cursors?.after;
       if (!next || seenCursors.has(next)) break;
+      if (page === maxPages - 1) {
+        throw new MetaError('META_PAGINATION_LIMIT', 'Page posts exceed the pagination limit.');
+      }
       seenCursors.add(next);
       after = next;
     }
@@ -117,7 +150,7 @@ export class MetaGraphApiClient {
   async getPostComments(
     pageToken: string,
     postId: string,
-    options: { maxPages?: number } = {}
+    options: { maxPages?: number; signal?: AbortSignal } = {}
   ): Promise<FacebookCommentDetails[]> {
     const comments: FacebookCommentDetails[] = [];
     const seenCursors = new Set<string>();
@@ -133,12 +166,16 @@ export class MetaGraphApiClient {
           limit: '100',
           ...(after ? { after } : {})
         },
-        graphCommentsResponseSchema
+        graphCommentsResponseSchema,
+        options.signal
       );
       comments.push(...response.data.map(normalizeGraphComment));
 
       const next = response.paging?.cursors?.after;
       if (!next || seenCursors.has(next)) break;
+      if (page === maxPages - 1) {
+        throw new MetaError('META_PAGINATION_LIMIT', 'Post comments exceed the pagination limit.');
+      }
       seenCursors.add(next);
       after = next;
     }
@@ -161,9 +198,11 @@ export class MetaGraphApiClient {
     path: string,
     token: string,
     query: Record<string, string>,
-    schema: z.ZodType<T>
+    schema: z.ZodType<T>,
+    signal?: AbortSignal
   ): Promise<T> {
     for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
+      if (signal?.aborted) throw new MetaError('SYNC_CANCELLED', 'Page synchronization cancelled.');
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
@@ -171,7 +210,7 @@ export class MetaGraphApiClient {
         const url = this.buildUrl(path, { ...query, access_token: token });
         const response = await this.fetchFn(url, {
           method: 'GET',
-          signal: controller.signal,
+          signal: signal ? AbortSignal.any([controller.signal, signal]) : controller.signal,
           headers: {
             Accept: 'application/json'
           }
@@ -183,7 +222,8 @@ export class MetaGraphApiClient {
           const graphError = graphErrorResponseSchema.safeParse(body);
           const code = normalizeGraphError(
             response.status,
-            graphError.success ? graphError.data.error.code : undefined
+            graphError.success ? graphError.data.error.code : undefined,
+            graphError.success ? graphError.data.error.error_subcode : undefined
           );
           const retryable = code === 'META_RATE_LIMITED' || response.status >= 500;
           if (retryable && attempt < this.maxRetries) {
@@ -200,6 +240,7 @@ export class MetaGraphApiClient {
 
         return parsed.data;
       } catch (error) {
+        if (signal?.aborted) throw new MetaError('SYNC_CANCELLED', 'Page synchronization cancelled.');
         const metaError = toMetaError(error);
         if (metaError.code === 'META_NETWORK_ERROR' && attempt < this.maxRetries) {
           await this.waitBeforeRetry(attempt);

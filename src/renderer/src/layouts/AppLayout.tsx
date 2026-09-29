@@ -1,5 +1,4 @@
-import type { ReactNode } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, Outlet } from 'react-router-dom';
 import {
   BarChart3,
   FileText,
@@ -23,11 +22,7 @@ const navigationItems = [
   { label: 'Cài đặt', to: '/settings', icon: Settings }
 ] as const;
 
-interface AppLayoutProps {
-  children: ReactNode;
-}
-
-export function AppLayout({ children }: AppLayoutProps): JSX.Element {
+export function AppLayout(): JSX.Element {
   return (
     <div className="min-h-screen bg-slate-100 text-slate-950">
       <div className="flex min-h-screen">
@@ -76,7 +71,7 @@ export function AppLayout({ children }: AppLayoutProps): JSX.Element {
           </div>
         </aside>
 
-        <main className="min-w-0 flex-1">{children}</main>
+        <main className="min-w-0 flex-1"><Outlet /></main>
       </div>
     </div>
   );

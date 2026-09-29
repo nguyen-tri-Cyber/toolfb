@@ -9,6 +9,52 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe('MetaGraphApiClient', () => {
+  it('does not fall back to an identity request after Page token lookup is cancelled', async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    const fetchFn: typeof fetch = async () => {
+      calls += 1;
+      controller.abort();
+      throw new DOMException('Aborted', 'AbortError');
+    };
+    const client = new MetaGraphApiClient({ fetchFn, maxRetries: 0 });
+
+    await expect(client.getPageAccessToken('user-token', 'page-1', { signal: controller.signal }))
+      .rejects.toMatchObject({ code: 'SYNC_CANCELLED' });
+    expect(calls).toBe(1);
+  });
+  it('stops an in-flight Graph request when sync is cancelled', async () => {
+    let started!: () => void;
+    const requestStarted = new Promise<void>((resolve) => { started = resolve; });
+    const fetchFn: typeof fetch = async (_input, init) => {
+      started();
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+      });
+    };
+    const client = new MetaGraphApiClient({ fetchFn, timeoutMs: 25, maxRetries: 0 });
+    const controller = new AbortController();
+    const pending = client.getPostComments('token', 'post-1', { signal: controller.signal });
+    await requestStarted;
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ code: 'SYNC_CANCELLED' });
+  });
+
+  it('reports incomplete pagination when the configured page limit is reached', async () => {
+    const fetchFn: typeof fetch = async (input) => {
+      const url = new URL(String(input));
+      return jsonResponse({
+        data: [{ id: url.pathname.endsWith('/posts') ? 'post-1' : 'comment-1' }],
+        paging: { cursors: { after: 'more' } }
+      });
+    };
+    const client = new MetaGraphApiClient({ fetchFn });
+
+    await expect(client.getPagePosts('token', 'page-1', { maxPages: 1 })).rejects.toMatchObject({ code: 'META_PAGINATION_LIMIT' });
+    await expect(client.getPostComments('token', 'post-1', { maxPages: 1 })).rejects.toMatchObject({ code: 'META_PAGINATION_LIMIT' });
+  });
+
   it('retrieves a Page access token without exposing it through page summaries', async () => {
     const fetchFn: typeof fetch = async (input) => {
       const url = new URL(String(input));

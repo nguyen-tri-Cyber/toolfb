@@ -10,3 +10,6 @@ src/renderer/dist/
 
 *.tsbuildinfo
 npm-debug.log*
+
+# Local SQLite data (including WAL sidecars)
+fsi.db*

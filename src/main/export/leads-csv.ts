@@ -24,7 +24,7 @@ function escapeCsv(value: unknown): string {
   return `"${stringValue.replaceAll('"', '""')}"`;
 }
 
-export function serializeLeadsCsv(items: LeadListItem[]): string {
+export function serializeLeadsCsv(items: LeadListItem[], delimiter: ',' | ';' = ','): string {
   const rows = items.map((lead) => [
     lead.id,
     lead.pageName,
@@ -40,5 +40,5 @@ export function serializeLeadsCsv(items: LeadListItem[]): string {
     lead.postPermalinkUrl
   ]);
 
-  return `\uFEFF${[HEADERS, ...rows].map((row) => row.map(escapeCsv).join(',')).join('\r\n')}`;
+  return `\uFEFF${[HEADERS, ...rows].map((row) => row.map(escapeCsv).join(delimiter)).join('\r\n')}`;
 }

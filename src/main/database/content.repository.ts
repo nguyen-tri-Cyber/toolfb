@@ -2,6 +2,25 @@ import type Database from 'better-sqlite3';
 import type { FacebookCommentDetails, FacebookPostDetails } from '../meta/meta.types';
 import { getDatabase } from './index';
 
+export interface StoredPostReference {
+  id: number;
+  facebookPostId: string;
+}
+
+export function listStoredPostsForPage(localPageId: number): StoredPostReference[] {
+  return listStoredPostsForPageInDatabase(getDatabase().sqlite, localPageId);
+}
+
+export function listStoredPostsForPageInDatabase(
+  sqlite: Database.Database,
+  localPageId: number
+): StoredPostReference[] {
+  return sqlite.prepare(
+    `SELECT id, facebook_post_id AS facebookPostId
+     FROM facebook_posts WHERE page_id = ? ORDER BY id`
+  ).all(localPageId) as StoredPostReference[];
+}
+
 export function upsertFacebookPost(
   localPageId: number,
   post: FacebookPostDetails

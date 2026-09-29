@@ -143,6 +143,48 @@ export function upsertLeadFromCommentInDatabase(
   return Number(result.lastInsertRowid);
 }
 
+export interface LeadHistoryItem {
+  id: number;
+  leadId: number;
+  action: string;
+  oldValue: string | null;
+  newValue: string | null;
+  createdAt: string;
+}
+
+export function recordLeadHistoryInDatabase(
+  sqlite: Database.Database,
+  leadId: number,
+  action: string,
+  oldValue: string | null,
+  newValue: string | null
+): void {
+  sqlite
+    .prepare(
+      `INSERT INTO lead_history (lead_id, action, old_value, new_value)
+       VALUES (?, ?, ?, ?)`
+    )
+    .run(leadId, action, oldValue, newValue);
+}
+
+export function getLeadHistory(leadId: number): LeadHistoryItem[] {
+  return getLeadHistoryFromDatabase(getDatabase().sqlite, leadId);
+}
+
+export function getLeadHistoryFromDatabase(
+  sqlite: Database.Database,
+  leadId: number
+): LeadHistoryItem[] {
+  return sqlite
+    .prepare(
+      `SELECT id, lead_id AS leadId, action, old_value AS oldValue, new_value AS newValue, created_at AS createdAt
+       FROM lead_history
+       WHERE lead_id = ?
+       ORDER BY id DESC`
+    )
+    .all(leadId) as LeadHistoryItem[];
+}
+
 export function updateLeadStatus(id: number, status: LeadStatus): void {
   updateLeadStatusInDatabase(getDatabase().sqlite, id, status);
 }
@@ -152,23 +194,132 @@ export function updateLeadStatusInDatabase(
   id: number,
   status: LeadStatus
 ): void {
-  const result = sqlite
-    .prepare('UPDATE leads SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-    .run(status, id);
-  if (result.changes === 0) {
-    throw new Error('Lead not found.');
-  }
+  sqlite.transaction(() => {
+    const current = sqlite.prepare('SELECT status FROM leads WHERE id = ?').get(id) as
+      | { status: LeadStatus }
+      | undefined;
+    if (!current) throw new Error('Lead not found.');
+
+    if (current.status !== status) {
+      sqlite.prepare('UPDATE leads SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(status, id);
+      recordLeadHistoryInDatabase(sqlite, id, 'STATUS_CHANGED', current.status, status);
+    }
+  })();
 }
 
 export function updateLeadDetails(id: number, note: string | null, tags: string[]): void {
-  const result = getDatabase()
-    .sqlite.prepare(
-      'UPDATE leads SET note = ?, tags_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-    )
-    .run(note, JSON.stringify(tags), id);
-  if (result.changes === 0) {
-    throw new Error('Lead not found.');
-  }
+  updateLeadDetailsInDatabase(getDatabase().sqlite, id, note, tags);
+}
+
+export function updateLeadDetailsInDatabase(
+  sqlite: Database.Database,
+  id: number,
+  note: string | null,
+  tags: string[]
+): void {
+  sqlite.transaction(() => {
+    const current = sqlite.prepare('SELECT note, tags_json FROM leads WHERE id = ?').get(id) as
+      | { note: string | null; tags_json: string }
+      | undefined;
+    if (!current) throw new Error('Lead not found.');
+
+    const newTagsJson = JSON.stringify(tags);
+    if (current.note === note && current.tags_json === newTagsJson) return;
+
+    sqlite.prepare('UPDATE leads SET note = ?, tags_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(note, newTagsJson, id);
+
+    if (current.note !== note) {
+      recordLeadHistoryInDatabase(sqlite, id, 'NOTE_UPDATED', current.note, note);
+    }
+    if (current.tags_json !== newTagsJson) {
+      recordLeadHistoryInDatabase(sqlite, id, 'TAGS_UPDATED', current.tags_json, newTagsJson);
+    }
+  })();
+}
+
+export function bulkUpdateLeadStatus(ids: number[], status: LeadStatus): { updated: number } {
+  return bulkUpdateLeadStatusInDatabase(getDatabase().sqlite, ids, status);
+}
+
+export function bulkUpdateLeadStatusInDatabase(
+  sqlite: Database.Database,
+  ids: number[],
+  status: LeadStatus
+): { updated: number } {
+  if (ids.length === 0) return { updated: 0 };
+
+  const getStmt = sqlite.prepare('SELECT id, status FROM leads WHERE id = ?');
+  const updateStmt = sqlite.prepare('UPDATE leads SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+  const historyStmt = sqlite.prepare(
+    'INSERT INTO lead_history (lead_id, action, old_value, new_value) VALUES (?, ?, ?, ?)'
+  );
+
+  let updated = 0;
+  const runTransaction = sqlite.transaction(() => {
+    for (const id of ids) {
+      const current = getStmt.get(id) as { id: number; status: LeadStatus } | undefined;
+      if (current && current.status !== status) {
+        updateStmt.run(status, id);
+        historyStmt.run(id, 'BULK_STATUS_CHANGED', current.status, status);
+        updated += 1;
+      }
+    }
+  });
+
+  runTransaction();
+  return { updated };
+}
+
+export function bulkAddLeadTags(ids: number[], newTags: string[]): { updated: number } {
+  return bulkAddLeadTagsInDatabase(getDatabase().sqlite, ids, newTags);
+}
+
+export function bulkAddLeadTagsInDatabase(
+  sqlite: Database.Database,
+  ids: number[],
+  newTags: string[]
+): { updated: number } {
+  if (ids.length === 0 || newTags.length === 0) return { updated: 0 };
+
+  const cleanNewTags = newTags.map((t) => t.trim()).filter(Boolean);
+  if (cleanNewTags.length === 0) return { updated: 0 };
+
+  const getStmt = sqlite.prepare('SELECT id, tags_json FROM leads WHERE id = ?');
+  const updateStmt = sqlite.prepare('UPDATE leads SET tags_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+  const historyStmt = sqlite.prepare(
+    'INSERT INTO lead_history (lead_id, action, old_value, new_value) VALUES (?, ?, ?, ?)'
+  );
+
+  let updated = 0;
+  const runTransaction = sqlite.transaction(() => {
+    for (const id of ids) {
+      const current = getStmt.get(id) as { id: number; tags_json: string } | undefined;
+      if (!current) continue;
+
+      const existingTags = parseTags(current.tags_json);
+      const tagSet = new Set(existingTags);
+      let changed = false;
+
+      for (const tag of cleanNewTags) {
+        if (!tagSet.has(tag)) {
+          tagSet.add(tag);
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        const merged = Array.from(tagSet);
+        const mergedJson = JSON.stringify(merged);
+        updateStmt.run(mergedJson, id);
+        historyStmt.run(id, 'BULK_TAGS_ADDED', current.tags_json, mergedJson);
+        updated += 1;
+      }
+    }
+  });
+
+  runTransaction();
+  return { updated };
 }
 
 export function listLeads(query: LeadListQuery): LeadListResult {

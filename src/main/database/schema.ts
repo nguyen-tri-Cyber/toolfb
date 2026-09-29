@@ -151,7 +151,7 @@ export const aiAnalyses = sqliteTable(
   })
 );
 
-export const syncJobStatuses = ['PENDING', 'RUNNING', 'SUCCESS', 'FAILED'] as const;
+export const syncJobStatuses = ['PENDING', 'RUNNING', 'SUCCESS', 'FAILED', 'CANCELLED'] as const;
 
 export const syncJobs = sqliteTable(
   'sync_jobs',
@@ -176,6 +176,48 @@ export const syncJobs = sqliteTable(
   })
 );
 
+export const leadHistory = sqliteTable(
+  'lead_history',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    leadId: integer('lead_id')
+      .notNull()
+      .references(() => leads.id, { onDelete: 'cascade' }),
+    action: text('action').notNull(),
+    oldValue: text('old_value'),
+    newValue: text('new_value'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`)
+  },
+  (table) => ({
+    leadIdIndex: index('lead_history_lead_id_idx').on(table.leadId),
+    createdAtIndex: index('lead_history_created_at_idx').on(table.createdAt)
+  })
+);
+
+export const syncCheckpoints = sqliteTable(
+  'sync_checkpoints',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    facebookPageId: text('facebook_page_id').notNull(),
+    stage: text('stage').notNull(),
+    postsProcessed: integer('posts_processed').notNull().default(0),
+    commentsProcessed: integer('comments_processed').notNull().default(0),
+    leadsDetected: integer('leads_detected').notNull().default(0),
+    completedPostIdsJson: text('completed_post_ids_json').notNull().default('[]'),
+    cursor: text('cursor'),
+    since: text('since'),
+    lastError: text('last_error'),
+    ...timestamps
+  },
+  (table) => ({
+    pageIdUnique: uniqueIndex('sync_checkpoints_facebook_page_id_unique').on(
+      table.facebookPageId
+    )
+  })
+);
+
 export const facebookPagesRelations = relations(facebookPages, ({ many }) => ({
   posts: many(facebookPosts)
 }));
@@ -196,9 +238,17 @@ export const facebookCommentsRelations = relations(facebookComments, ({ one, man
   leads: many(leads)
 }));
 
-export const leadsRelations = relations(leads, ({ one }) => ({
+export const leadsRelations = relations(leads, ({ one, many }) => ({
   sourceComment: one(facebookComments, {
     fields: [leads.sourceCommentId],
     references: [facebookComments.id]
+  }),
+  history: many(leadHistory)
+}));
+
+export const leadHistoryRelations = relations(leadHistory, ({ one }) => ({
+  lead: one(leads, {
+    fields: [leadHistory.leadId],
+    references: [leads.id]
   })
 }));

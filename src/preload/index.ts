@@ -1,4 +1,7 @@
 import { contextBridge } from 'electron';
-import { fsiApi } from './api';
+import { createFsiApi } from './api';
 
-contextBridge.exposeInMainWorld('fsi', fsiApi);
+declare const __IS_DEV__: boolean | undefined;
+const isDev = typeof __IS_DEV__ !== 'undefined' ? __IS_DEV__ : process.env.NODE_ENV !== 'production';
+
+contextBridge.exposeInMainWorld('fsi', createFsiApi(isDev));

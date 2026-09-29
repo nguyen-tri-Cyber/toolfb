@@ -115,6 +115,86 @@ Meta OAuth
 
 Mục tiêu: biến POC thành app mà người không kỹ thuật có thể cài, mở và kết nối.
 
+#### Kế hoạch chi tiết — Production Meta OAuth + Onboarding
+
+**Phạm vi của đợt này:** thay toàn bộ đường nhập development token bằng đăng nhập Meta production, giữ token ngoài renderer, cho người dùng chọn Page và chạy sync đầu tiên trong một onboarding ngắn. Chưa mở rộng sang scheduler, backup/restore, installer hay license trong đợt này.
+
+**Kiến trúc mục tiêu:**
+
+```text
+Renderer
+  -> IPC typed contract
+  -> Electron main process
+  -> mở trình duyệt hệ thống tới OAuth broker
+  -> Meta Login / Facebook Login for Business
+  -> backend callback + code/token exchange
+  -> one-time desktop handoff
+  -> main process lưu credential bằng safeStorage
+  -> Graph API client dùng credential trong main process
+  -> renderer chỉ nhận connection state + Page data
+```
+
+Không nhúng Meta App Secret vào Electron. Renderer không nhận access token. Backend broker chỉ xử lý phần cần secret/callback và trả về one-time handoff ngắn hạn cho desktop. Cơ chế callback cụ thể phải được xác minh lại với tài liệu Meta đang áp dụng cho app trước khi triển khai production; ưu tiên system browser và callback/deep-link hoặc loopback đã được Meta hỗ trợ chính thức.
+
+**Quyền tối thiểu cho Owned Page MVP:**
+
+- `pages_show_list`: lấy danh sách Page người dùng quản lý.
+- `pages_read_engagement`: đọc nội dung/metadata do Page đăng.
+- `pages_read_user_content`: đọc nội dung do người dùng tạo trên Page, đặc biệt comment mà FSI cần phân tích lead.
+- Không xin `pages_manage_engagement`, `business_management` hoặc quyền write khác trong đợt này nếu core use case chưa cần.
+
+Các quyền production phải đi qua App Review/Advanced Access phù hợp. Hồ sơ review cần quay đầy đủ flow login -> chọn Page -> hiển thị post/comment -> lead workflow bằng tài khoản test hợp lệ.
+
+**Dependency graph:**
+
+```text
+OAuth contract + state model
+  -> secure credential store
+  -> OAuth broker/callback adapter
+  -> IPC/preload contract
+  -> Settings connection UI
+  -> Onboarding shell
+  -> Page selection/import
+  -> first sync
+  -> error/reconnect states
+  -> App Review evidence + production checklist
+```
+
+**Thứ tự triển khai:**
+
+1. Chốt typed state model: `disconnected | connecting | connected | expired | revoked | permission_missing | error`, cùng metadata an toàn như `checkedAt`, `accountName`, `grantedPermissions`, `missingPermissions`; không expose token.
+2. Đổi `token.service.ts` thành credential store trung tính; giữ file development token cũ ngoài production flow và xóa file cũ sau khi production credential đã được lưu thành công.
+3. Tạo OAuth broker contract trong main process: `connect()`, `completeCallback()`, `status()`, `reconnect()`, `disconnect()`. Thêm `state` chống CSRF/replay, timeout và one-time handoff; App Secret chỉ ở backend.
+4. Mở rộng `MetaGraphApiClient` để validate `/me`, kiểm tra permission đã cấp và map lỗi Meta thành state rõ ràng thay vì chỉ `META_TOKEN_INVALID`/`META_PERMISSION_DENIED` chung chung.
+5. Thay IPC `META_SAVE_DEVELOPMENT_TOKEN` bằng `META_CONNECT`, `META_RECONNECT`, `META_GET_CONNECTION_STATUS`, `META_DISCONNECT`; giữ `META_TEST_CONNECTION` chỉ nếu còn giá trị support.
+6. Thay UI Settings: bỏ input token, thêm trạng thái tài khoản, quyền còn thiếu, nút Kết nối/Kết nối lại/Ngắt kết nối và mô tả tiếng Việt ngắn gọn.
+7. Tạo onboarding 4 bước: Chào mừng -> Kết nối Meta -> Chọn Page -> Đồng bộ lần đầu. Cho phép bỏ qua và quay lại từ Settings.
+8. Gắn Page selection với flow hiện có trong `Pages.tsx`; tái sử dụng `getAccessiblePages/importPage/syncPage`, không tạo pipeline sync thứ hai.
+9. Bổ sung test cho state mapping, credential store, IPC contract, onboarding navigation và lỗi expired/revoked/missing permission.
+10. Chuẩn bị App Review: privacy policy, data deletion instructions, screencast, test credentials/roles, permission use-case text, Data Use Checkup/compliance checklist nếu Meta yêu cầu cho app.
+
+**Các file dự kiến chạm:**
+
+- `src/main/meta/meta.service.ts`
+- `src/main/meta/token.service.ts` (đổi vai trò thành credential store hoặc tách file mới)
+- `src/main/meta/meta.client.ts`
+- `src/main/meta/meta.errors.ts`
+- `src/main/ipc/meta.ipc.ts`
+- `src/main/index.ts`
+- `src/shared/constants/ipc.ts`
+- `src/shared/schemas/ipc.ts`
+- `src/shared/types/ipc.ts`
+- `src/preload/api.ts`
+- `src/renderer/src/App.tsx`
+- `src/renderer/src/pages/Settings.tsx`
+- `src/renderer/src/pages/Pages.tsx`
+- `src/renderer/src/pages/Onboarding.tsx` (mới)
+- test files tương ứng trong `src/main/meta`, `src/main/ipc`, `src/renderer`
+
+**Checkpoint OAuth:** user có thể bấm Kết nối Meta, hoàn thành login ngoài renderer, quay lại app ở trạng thái `connected`, và token không xuất hiện trong renderer/log/SQLite.
+
+**Checkpoint Onboarding:** user mới có thể đi từ mở app -> connect -> chọn Page -> import -> sync lần đầu mà không nhập token thủ công.
+
 - Thay development-token UI bằng production Meta OAuth.
 - Onboarding 4 bước: chào mừng → đăng nhập Meta → chọn Page → đồng bộ lần đầu.
 - Trang Settings chuyển từ “cấu hình phát triển” thành kết nối tài khoản, dữ liệu, đồng bộ và quyền riêng tư.

@@ -1,5 +1,26 @@
 # Facebook Sales Intelligence — Commercialization Task List
 
+## Meta Developer Mode (Local-First Dev Token Testing) — 2026-09-28
+
+- [x] Task DEV-1: Khai báo IPC channel, Zod schema, types và mã lỗi tiếng Việt cho Developer Mode.
+- [x] Task DEV-2: Triển khai `MetaService.setDeveloperToken` với xác thực `/me`, permissions và lưu `safeStorage`.
+- [x] Task DEV-3: Đăng ký typed IPC handler có kiểm tra môi trường dev và cấu hình preload API có điều kiện.
+- [x] Task DEV-4: Xây giao diện Meta Developer Mode trong Settings (chỉ hiển thị ở development).
+- [x] Task DEV-5: Viết bộ unit/integration test cho service, IPC, storage và xác minh production mode không expose manual-token API.
+- [x] Checkpoint: `npm test`, `npm run typecheck`, `npm run lint`, `npm run build` pass.
+- [x] Task DEV-6: Hướng dẫn và kiểm thử E2E local bằng Meta Graph API giả lập (Token -> kết nối -> chọn Page -> import -> sync -> Comments -> Lead detection -> Lead Inbox).
+- [ ] Manual E2E với Meta Page và token thật; chưa có Page/token hợp lệ để xác minh.
+
+## Production OAuth + onboarding implementation — 2026-09-28
+
+Đã có trong source: OAuth broker mẫu, system-browser/loopback handoff có state và verifier,
+credential store `safeStorage`, permission check, typed IPC, Settings không nhập token,
+onboarding 4 bước, resume bước đồng bộ, và test cho callback/handoff/token/status.
+
+Chưa thể đánh dấu production-ready: chưa có Meta App ID, App Secret trên server, HTTPS domain,
+Meta App Review/Advanced Access, hoặc live end-to-end với Page thật. Cần cấu hình theo
+`docs/meta-oauth.md` và xác minh yêu cầu Meta hiện hành trước khi phát hành.
+
 ## Owned Page MVP progress — 2026-09-28
 
 Đã hoàn thành và có automated verification trong source hiện tại:
@@ -16,31 +37,129 @@
 - [x] CSP + controlled external-link handler + typed IPC validation.
 - [x] Migration compatibility test cho các cột Owned Page MVP mới.
 
-Chưa được coi là hoàn tất: production OAuth/App Review, backup/restore, scheduler cancel/resume, bulk lead actions/history, XLSX, date-range analytics, installer/signing/update/license và closed beta. Live Meta end-to-end vẫn cần token/quyền hợp lệ trên máy người dùng.
+Chưa được coi là hoàn tất: production OAuth/App Review, backup/restore, date-range analytics, installer/signing/update/license và closed beta. Live Meta end-to-end vẫn cần token/quyền hợp lệ trên máy người dùng.
+
+## Local sync reliability & Lead Inbox Enhancements — 2026-09-29
+
+- [x] Quét lại comment trên mọi post đã lưu, kể cả post ngoài cửa sổ incremental 7 ngày; không quét trùng post mới trong cùng lượt.
+- [x] Hủy đồng bộ qua Pages/IPC, job chuyển CANCELLED và có thể chạy lại với upsert chống trùng.
+- [x] Vượt giới hạn phân trang trả lỗi, không đánh dấu sync hoàn tất.
+- [x] Tests cho post cũ, lỗi giữa chừng/chạy lại, hủy, trạng thái job và phân trang.
+- [x] Progress chi tiết theo thời gian thực: streaming qua IPC channel `META_SYNC_PROGRESS`, hiển thị tiến độ và trạng thái trực quan trong giao diện Pages.
+- [x] Checkpoint bền vững ở cấp bài viết: lưu ID bài đã hoàn tất, stage, metrics và mốc `since`; sau lỗi, hủy hoặc restart, tải lại danh sách bài và bỏ qua các bài đã hoàn tất.
+- [ ] Resume theo cursor phân trang Meta: cột `cursor` hiện chưa được sử dụng; danh sách bài viết và bình luận của một bài vẫn được tải lại từ đầu khi tiếp tục.
+- [x] Lead Inbox Bulk Actions: Chọn nhiều lead, chọn tất cả trên trang, đổi trạng thái hàng loạt, thêm tags hàng loạt qua IPC handlers chuyên dụng.
+- [x] Lead Change History: Bảng `lead_history` lưu vết thay đổi trạng thái, ghi chú, nhãn với timeline trực quan trên giao diện Lead Inbox.
+- [x] Xuất dữ liệu Lead Inbox hoàn thiện: Hỗ trợ Excel Workbook (.xlsx) mở trực tiếp trong Excel hiển thị đúng 100% tiếng Việt Unicode và 12 cột riêng biệt, lẫn CSV (.csv) chuẩn RFC 4180 có UTF-8 BOM; chống formula injection; tên gợi ý theo mili-giây không trùng; xử lý an toàn và báo lỗi rõ ràng khi tệp bị khóa (EBUSY/EPERM).
+- [x] Đầy đủ unit/integration tests cho checkpoint repository, bulk lead mutations, lead history, sync resumption, IPC handlers, XLSX/CSV export và UI components (25 test suites, 89 tests pass 100%).
+- [ ] Manual test / Live E2E với Meta Page và token thật trên môi trường thực tế của người dùng (chưa đánh dấu hoàn tất vì chưa có Page/token thật).
 
 ## Phase A — Productize nền móng
 
 ### Task 1 — Định nghĩa production Meta connection contract
 
-**Description:** Thay thiết kế development-token bằng flow OAuth production và xác định rõ token lifecycle, permission, reconnect/error states trước khi viết UI mới.
+**Description:** Thay thiết kế development-token bằng contract production OAuth có state machine rõ ràng. Đây là foundation cho mọi bước phía sau và phải giữ raw token/App Secret ngoài renderer.
 
 **Acceptance criteria:**
-- [ ] Có typed service contract cho connect/status/disconnect/reconnect.
-- [ ] Renderer không nhận raw access token.
-- [ ] Có state rõ cho connected, expired, revoked, permission-missing và error.
+- [ ] Có typed state `disconnected | connecting | connected | expired | revoked | permission_missing | error` và service contract `connect/status/reconnect/disconnect`.
+- [ ] Renderer chỉ nhận trạng thái/metadata an toàn; không nhận raw access token, App Secret hoặc OAuth code.
+- [ ] Required permissions được khai báo tập trung: `pages_show_list`, `pages_read_engagement`, `pages_read_user_content`.
 
 **Verification:**
-- [ ] Unit tests cho state/error mapping.
+- [ ] Unit tests cho state/error/permission mapping.
 - [ ] `npm run typecheck` pass.
 - [ ] Review contract trước khi triển khai UI.
 
 **Dependencies:** None
 
+**Files likely touched:**
+- `src/shared/schemas/ipc.ts`
+- `src/shared/types/ipc.ts`
+- `src/shared/constants/ipc.ts`
+- `src/main/meta/meta.errors.ts`
+- `src/main/meta/meta.service.ts`
+
 **Estimated scope:** Medium
+
+### Task 1.1 — Secure credential store + retire development token
+
+**Description:** Chuyển `token.service.ts` từ file development token sang credential store trung tính dùng `safeStorage`; file cũ không cấp quyền production và được dọn sau khi credential mới lưu thành công.
+
+**Acceptance criteria:**
+- [ ] Credential production được mã hóa bằng `safeStorage` và không lưu trong SQLite/log.
+- [ ] Development token cũ không còn là input của production flow; file cũ chỉ bị xóa sau khi migration/cleanup thành công.
+- [ ] Corrupt/unreadable credential trả state an toàn và không crash app.
+
+**Verification:**
+- [ ] Unit tests save/read/delete/corrupt/migration.
+- [ ] Restart app vẫn đọc được trạng thái kết nối.
+- [ ] `npm run typecheck` pass.
+
+**Dependencies:** Task 1
+
+**Files likely touched:**
+- `src/main/meta/token.service.ts`
+- `src/main/meta/meta.service.ts`
+- `src/main/meta/meta.service.test.ts`
+
+**Estimated scope:** Medium
+
+### Task 1.2 — OAuth broker + callback handoff
+
+**Description:** Tạo production OAuth flow qua system browser và backend broker để Electron không chứa App Secret. Broker xử lý callback/token exchange và trả one-time handoff cho main process.
+
+**Acceptance criteria:**
+- [ ] `connect()` mở login flow ngoài renderer và tạo `state` chống CSRF/replay có expiry.
+- [ ] Callback/handoff chỉ dùng một lần; token exchange cần secret chỉ chạy ở backend.
+- [ ] Cancel, timeout và callback sai state được map thành lỗi rõ ràng.
+
+**Verification:**
+- [ ] Unit/integration tests state, expiry, replay, cancel và malformed callback.
+- [ ] Manual dev flow với Meta test user/app role.
+- [ ] Không có App Secret trong bundle Electron.
+
+**Dependencies:** Task 1, Task 1.1
+
+**Files likely touched:**
+- `src/main/meta/oauth.service.ts` (mới)
+- `src/main/meta/meta.service.ts`
+- `src/main/index.ts`
+- backend OAuth broker tương ứng
+
+**Estimated scope:** Medium
+
+### Task 1.3 — Permission validation + reconnect lifecycle
+
+**Description:** Sau OAuth, xác minh identity/permissions và chuyển các lỗi expired, revoked, thiếu quyền thành connection state có thể phục hồi.
+
+**Acceptance criteria:**
+- [ ] Kết nối chỉ được coi là ready khi đủ ba permission MVP và gọi Graph API kiểm tra thành công.
+- [ ] Expired/revoked/permission-missing có state + thông điệp tiếng Việt riêng.
+- [ ] `reconnect()` không xóa dữ liệu Page/Post/Comment/Lead local.
+
+**Verification:**
+- [ ] Tests cho permission matrix và Graph error mapping.
+- [ ] Manual revoke permission -> app hiển thị reconnect đúng.
+- [ ] `npm test` và `npm run typecheck` pass.
+
+**Dependencies:** Task 1.2
+
+**Files likely touched:**
+- `src/main/meta/meta.client.ts`
+- `src/main/meta/meta.errors.ts`
+- `src/main/meta/meta.service.ts`
+
+**Estimated scope:** Medium
+
+### Checkpoint OAuth Foundation
+
+- [ ] Connect/reconnect/disconnect chạy qua typed IPC.
+- [ ] Renderer/log/SQLite không chứa raw token hoặc App Secret.
+- [ ] `npm test`, `npm run typecheck`, `npm run lint`, `npm run build` pass.
 
 ### Task 2 — Xây onboarding kết nối Page
 
-**Description:** Tạo flow chào mừng → kết nối Meta → chọn Page → bắt đầu sync, dành cho người không kỹ thuật.
+**Description:** Tạo onboarding 4 bước cho người dùng Việt Nam: Chào mừng -> Kết nối Meta -> Chọn Page -> Đồng bộ lần đầu, tái sử dụng Page import/sync hiện có.
 
 **Acceptance criteria:**
 - [ ] Không còn yêu cầu người dùng nhập development access token.
@@ -54,7 +173,113 @@ Chưa được coi là hoàn tất: production OAuth/App Review, backup/restore,
 
 **Dependencies:** Task 1
 
+**Files likely touched:**
+- `src/renderer/src/pages/Onboarding.tsx`
+- `src/renderer/src/App.tsx`
+- `src/renderer/src/pages/Settings.tsx`
+- `src/renderer/src/pages/Pages.tsx`
+- `src/preload/api.ts`
+- `src/main/ipc/meta.ipc.ts`
+
 **Estimated scope:** Medium
+
+### Task 2.1 — Production Settings connection UI
+
+**Description:** Bỏ development token field khỏi Settings và thay bằng connection status, quyền, reconnect/disconnect actions.
+
+**Acceptance criteria:**
+- [ ] Settings không còn chữ/input Development Access Token.
+- [ ] Connected/expired/revoked/permission-missing hiển thị bằng tiếng Việt và có action phù hợp.
+- [ ] Disconnect có xác nhận nhưng không xóa dữ liệu local.
+
+**Verification:**
+- [ ] Component tests cho các connection states.
+- [ ] Keyboard/focus states hoạt động.
+- [ ] `npm run build` pass.
+
+**Dependencies:** Checkpoint OAuth Foundation
+
+**Files likely touched:**
+- `src/renderer/src/pages/Settings.tsx`
+- `src/renderer/src/components/StatusBadge.tsx`
+
+**Estimated scope:** Small/Medium
+
+### Task 2.2 — Onboarding shell + resume state
+
+**Description:** Thêm route/shell onboarding và lưu progress tối thiểu để user có thể bỏ qua hoặc tiếp tục sau.
+
+**Acceptance criteria:**
+- [ ] 4 bước rõ ràng, không yêu cầu kiến thức developer/API.
+- [ ] Skip đưa user vào app và Settings có CTA quay lại onboarding.
+- [ ] Restart app không làm mất trạng thái đã connect/import Page.
+
+**Verification:**
+- [ ] Component/navigation tests.
+- [ ] Manual fresh install state và resume state.
+- [ ] `npm run typecheck` pass.
+
+**Dependencies:** Task 2.1
+
+**Files likely touched:**
+- `src/renderer/src/pages/Onboarding.tsx`
+- `src/renderer/src/App.tsx`
+- local preference/state helper nếu cần
+
+**Estimated scope:** Medium
+
+### Task 2.3 — Page selection + first sync vertical slice
+
+**Description:** Nhúng `getAccessiblePages -> importPage -> syncPage` vào onboarding, dùng đúng service hiện có để tránh tạo pipeline song song.
+
+**Acceptance criteria:**
+- [ ] User thấy danh sách Page đã cấp quyền và chọn ít nhất một Page.
+- [ ] Import Page chống trùng và onboarding chuyển sang first sync bằng service hiện tại.
+- [ ] Sync success đưa user vào Dashboard/Leads; sync failure có retry mà không mất Page đã import.
+
+**Verification:**
+- [ ] Component/service tests cho select/import/sync transitions.
+- [ ] Manual login -> select Page -> sync -> thấy dữ liệu local.
+- [ ] Re-run onboarding không tạo duplicate Page/Post/Comment.
+
+**Dependencies:** Task 2.2, Task 1.3
+
+**Files likely touched:**
+- `src/renderer/src/pages/Onboarding.tsx`
+- `src/renderer/src/pages/Pages.tsx`
+- `src/main/ipc/meta.ipc.ts`
+- existing sync service/tests
+
+**Estimated scope:** Medium
+
+### Task 2.4 — App Review + production readiness evidence
+
+**Description:** Chuẩn bị đầy đủ artefact để xin quyền Meta production và kiểm tra live-mode flow trước pilot.
+
+**Acceptance criteria:**
+- [ ] Có permission use-case text cho `pages_show_list`, `pages_read_engagement`, `pages_read_user_content`.
+- [ ] Có screencast login -> Page selection -> đọc post/comment -> lead workflow.
+- [ ] Privacy policy, data deletion instructions, test user/role và compliance checklist sẵn sàng.
+
+**Verification:**
+- [ ] Dry-run App Review checklist bằng test app/live configuration.
+- [ ] Không yêu cầu permission ngoài core use case.
+- [ ] Live Meta end-to-end pass với tài khoản/Page hợp lệ trước closed beta.
+
+**Dependencies:** Task 2.3
+
+**Files likely touched:**
+- `docs/meta-app-review.md` (mới)
+- cấu hình backend OAuth broker/app dashboard ngoài repo khi cần
+
+**Estimated scope:** Small/Medium
+
+### Checkpoint Production OAuth + Onboarding
+
+- [ ] Fresh user: mở app -> Kết nối Meta -> chọn Page -> sync lần đầu thành công.
+- [ ] Expired/revoked/missing permission đều có recovery path rõ.
+- [ ] Không nhập token thủ công; không expose token/App Secret cho renderer.
+- [ ] Full quality gate pass và App Review evidence hoàn chỉnh.
 
 ### Task 3 — Chuẩn hóa database migration và backup/restore
 
@@ -123,7 +348,7 @@ Chưa được coi là hoàn tất: production OAuth/App Review, backup/restore,
 **Description:** Tách orchestration đồng bộ khỏi UI, hỗ trợ progress, retry/backoff, cancel và resume.
 
 **Acceptance criteria:**
-- [ ] Job state luôn kết thúc ở success/failed/cancelled hợp lệ.
+- [x] Job state luôn kết thúc ở success/failed/cancelled hợp lệ trong các đường hoàn tất, lỗi và hủy đã test.
 - [x] Lỗi mạng tạm thời retry hữu hạn; lỗi permission không retry vô hạn.
 - [x] Restart app không làm mất khả năng nhận biết job dở dang; RUNNING được recovery thành FAILED/APP_RESTARTED.
 

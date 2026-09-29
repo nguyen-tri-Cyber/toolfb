@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 import type { FsiApi } from '@shared/types/ipc';
 
 declare global {

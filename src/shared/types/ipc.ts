@@ -16,6 +16,9 @@ import type {
   pagesListSchema,
   postListResultSchema,
   reportSummarySchema,
+  leadHistoryItemSchema,
+  syncCheckpointSchema,
+  syncProgressEventSchema,
   safeErrorSchema,
   safeResultSchema
 } from '../schemas/ipc';
@@ -38,6 +41,9 @@ export type LeadListResult = z.infer<typeof leadListResultSchema>;
 export type LeadExportResult = z.infer<typeof leadExportResultSchema>;
 export type ReportSummary = z.infer<typeof reportSummarySchema>;
 export type OpenExternalResult = z.infer<typeof openExternalResultSchema>;
+export type LeadHistoryItem = z.infer<typeof leadHistoryItemSchema>;
+export type SyncProgressEvent = z.infer<typeof syncProgressEventSchema>;
+export type SyncCheckpoint = z.infer<typeof syncCheckpointSchema>;
 
 export interface ListQuery {
   pageId?: number;
@@ -67,12 +73,18 @@ export interface FsiApi {
   };
   meta: {
     getConnectionStatus: () => Promise<SafeResult<MetaConnectionStatus>>;
-    saveDevelopmentToken: (token: string) => Promise<SafeResult<MetaConnectionStatus>>;
+    connect: () => Promise<SafeResult<MetaConnectionStatus>>;
+    reconnect: () => Promise<SafeResult<MetaConnectionStatus>>;
     disconnect: () => Promise<SafeResult<MetaConnectionStatus>>;
     testConnection: () => Promise<SafeResult<MetaConnectionStatus>>;
     getAccessiblePages: () => Promise<SafeResult<AccessiblePagesResult>>;
     importPage: (pageId: string) => Promise<SafeResult<FacebookPageRecord>>;
-    syncPage: (pageId: string) => Promise<SafeResult<PageSyncResult>>;
+    syncPage: (pageId: string, options?: { resume?: boolean }) => Promise<SafeResult<PageSyncResult>>;
+    cancelSync: (pageId: string) => Promise<SafeResult<{ cancelled: boolean }>>;
+    getSyncCheckpoint: (pageId: string) => Promise<SafeResult<SyncCheckpoint | null>>;
+    discardCheckpoint: (pageId: string) => Promise<SafeResult<{ discarded: true }>>;
+    onSyncProgress: (callback: (progress: SyncProgressEvent) => void) => () => void;
+    setDeveloperToken?: (token: string) => Promise<SafeResult<MetaConnectionStatus>>;
   };
   pages: {
     list: () => Promise<SafeResult<PagesListResult>>;
@@ -87,6 +99,9 @@ export interface FsiApi {
     list: (query?: LeadListQuery) => Promise<SafeResult<LeadListResult>>;
     updateStatus: (id: number, status: LeadStatus) => Promise<SafeResult<{ updated: true }>>;
     updateDetails: (id: number, note: string | null, tags: string[]) => Promise<SafeResult<{ updated: true }>>;
+    bulkUpdateStatus: (ids: number[], status: LeadStatus) => Promise<SafeResult<{ updated: number }>>;
+    bulkAddTags: (ids: number[], tags: string[]) => Promise<SafeResult<{ updated: number }>>;
+    getHistory: (leadId: number) => Promise<SafeResult<{ items: LeadHistoryItem[] }>>;
     exportCsv: (query?: LeadExportQuery) => Promise<SafeResult<LeadExportResult>>;
   };
   reports: {

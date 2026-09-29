@@ -50,17 +50,20 @@ export const facebookPageRecordSchema = facebookPageSummarySchema.extend({
 });
 
 export const metaConnectionStatusSchema = z.object({
+  state: z.enum(['disconnected', 'connecting', 'connected', 'expired', 'revoked', 'permission_missing', 'error']),
   connected: z.boolean(),
   encryptionAvailable: z.boolean(),
-  checkedAt: z.string()
-});
-
-export const developmentTokenInputSchema = z.object({
-  token: z.string().trim().min(20).max(10000)
+  checkedAt: z.string(),
+  accountName: z.string().optional(),
+  missingPermissions: z.array(z.string()).default([])
 });
 
 export const pageIdInputSchema = z.object({
   pageId: z.string().trim().regex(/^\d+$/, 'Facebook Page ID must be a numeric string.')
+});
+
+export const developerTokenInputSchema = z.object({
+  token: z.string().trim().min(1, 'Access Token không được để trống.')
 });
 
 export const accessiblePagesSchema = z.object({
@@ -178,6 +181,67 @@ export const leadDetailsUpdateInputSchema = z.object({
 });
 
 export const leadMutationResultSchema = z.object({ updated: z.literal(true) });
+
+export const leadBulkStatusUpdateInputSchema = z.object({
+  ids: z.array(z.number().int().positive()).min(1),
+  status: leadStatusSchema
+});
+
+export const leadBulkAddTagsInputSchema = z.object({
+  ids: z.array(z.number().int().positive()).min(1),
+  tags: z.array(z.string().trim().min(1).max(40)).min(1).max(10)
+});
+
+export const leadBulkMutationResultSchema = z.object({
+  updated: z.number().int().nonnegative()
+});
+
+export const leadHistoryItemSchema = z.object({
+  id: z.number().int().positive(),
+  leadId: z.number().int().positive(),
+  action: z.string(),
+  oldValue: z.string().nullable(),
+  newValue: z.string().nullable(),
+  createdAt: z.string()
+});
+
+export const leadHistoryResultSchema = z.object({
+  items: z.array(leadHistoryItemSchema)
+});
+
+export const syncProgressEventSchema = z.object({
+  facebookPageId: z.string().min(1),
+  stage: z.enum([
+    'STARTING',
+    'FETCHING_PAGE_TOKEN',
+    'FETCHING_POSTS',
+    'PROCESSING_POSTS',
+    'CHECKING_STORED_POSTS',
+    'COMPLETED',
+    'CANCELLED',
+    'FAILED'
+  ]),
+  message: z.string(),
+  postsProcessed: z.number().int().nonnegative(),
+  commentsProcessed: z.number().int().nonnegative(),
+  leadsDetected: z.number().int().nonnegative(),
+  currentPostIndex: z.number().int().positive().optional(),
+  totalPosts: z.number().int().nonnegative().optional()
+});
+
+export const syncCheckpointSchema = z.object({
+  facebookPageId: z.string().min(1),
+  stage: z.string(),
+  postsProcessed: z.number().int().nonnegative(),
+  commentsProcessed: z.number().int().nonnegative(),
+  leadsDetected: z.number().int().nonnegative(),
+  completedPostIds: z.array(z.string()),
+  cursor: z.string().nullable().optional(),
+  since: z.string().nullable().optional(),
+  lastError: z.string().nullable().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional()
+});
 
 export const leadExportInputSchema = z.object({
   pageId: z.number().int().positive().optional(),

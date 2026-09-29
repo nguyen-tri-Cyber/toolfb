@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import {
+  listStoredPostsForPageInDatabase,
   upsertFacebookCommentInDatabase,
   upsertFacebookPostInDatabase
 } from './content.repository';
@@ -51,6 +52,19 @@ function createTestDatabase(): Database.Database {
 }
 
 describe('content.repository', () => {
+  it('lists stored post references for only the requested Page', () => {
+    const sqlite = createTestDatabase();
+    sqlite.prepare('INSERT INTO facebook_pages (facebook_page_id, name) VALUES (?, ?)').run('page-2', 'Other');
+    const post = {
+      facebookPostId: 'old-post', message: 'Old', postType: null,
+      reactionsCount: 0, commentsCount: 0, sharesCount: 0, rawJson: '{}'
+    };
+    const id = upsertFacebookPostInDatabase(sqlite, 1, post);
+    upsertFacebookPostInDatabase(sqlite, 2, { ...post, facebookPostId: 'other-post' });
+
+    expect(listStoredPostsForPageInDatabase(sqlite, 1)).toEqual([{ id, facebookPostId: 'old-post' }]);
+  });
+
   it('upserts posts and comments by Facebook id without creating duplicates', () => {
     const sqlite = createTestDatabase();
     const post = {

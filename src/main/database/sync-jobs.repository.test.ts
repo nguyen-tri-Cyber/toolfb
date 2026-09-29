@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import {
+  cancelSyncJobInDatabase,
   failSyncJobInDatabase,
   finishSyncJobInDatabase,
   recoverInterruptedSyncJobsInDatabase,
@@ -28,6 +29,16 @@ function createDatabase(): Database.Database {
 }
 
 describe('sync-jobs.repository', () => {
+  it('records a cancelled job without marking it successful', () => {
+    const sqlite = createDatabase();
+    const id = startSyncJobInDatabase(sqlite, 'OWNED_PAGE_SYNC', 7);
+    cancelSyncJobInDatabase(sqlite, id, 3);
+
+    expect(sqlite.prepare('SELECT status, processed_items, finished_at FROM sync_jobs WHERE id = ?').get(id)).toEqual({
+      status: 'CANCELLED', processed_items: 3, finished_at: expect.any(String)
+    });
+  });
+
   it('records running and successful sync state', () => {
     const sqlite = createDatabase();
     const id = startSyncJobInDatabase(sqlite, 'OWNED_PAGE_SYNC', 7);

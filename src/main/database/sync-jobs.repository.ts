@@ -51,6 +51,22 @@ export function failSyncJob(
   failSyncJobInDatabase(getDatabase().sqlite, jobId, errorCode, errorMessage, failedItems);
 }
 
+export function cancelSyncJob(jobId: number, processedItems: number): void {
+  cancelSyncJobInDatabase(getDatabase().sqlite, jobId, processedItems);
+}
+
+export function cancelSyncJobInDatabase(
+  sqlite: Database.Database,
+  jobId: number,
+  processedItems: number
+): void {
+  sqlite.prepare(
+    `UPDATE sync_jobs
+     SET status = 'CANCELLED', processed_items = ?, finished_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND status = 'RUNNING'`
+  ).run(processedItems, jobId);
+}
+
 export function failSyncJobInDatabase(
   sqlite: Database.Database,
   jobId: number,

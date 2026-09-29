@@ -6,16 +6,19 @@
   "type": "module",
   "scripts": {
     "dev": "electron-vite dev",
+    "broker": "node backend/oauth-broker.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "lint": "eslint .",
-    "test": "vitest run",
+    "test": "vitest run && node --test backend/oauth-broker.test.mjs",
     "build": "npm run typecheck && electron-vite build"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^3.0.0",
+    "@types/exceljs": "^0.5.3",
     "better-sqlite3": "^13.0.3",
     "drizzle-orm": "^0.38.4",
+    "exceljs": "^4.4.0",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -25,6 +28,7 @@
   },
   "devDependencies": {
     "@electron-toolkit/tsconfig": "^1.0.1",
+    "@swc/core": "^1.10.1",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.5",
     "@types/react": "^18.3.18",
@@ -32,7 +36,6 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "electron": "^44.4.5",
-    "@swc/core": "^1.10.1",
     "electron-vite": "^5.0.0",
     "eslint": "^9.17.0",
     "eslint-plugin-react-hooks": "^5.1.0",
@@ -42,7 +45,7 @@
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.18.2",
-    "vitest": "^5.0.1",
-    "vite": "^6.0.6"
+    "vite": "^6.0.6",
+    "vitest": "^5.0.1"
   }
 }

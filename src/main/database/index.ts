@@ -130,7 +130,7 @@ export function runMigrations(sqlite: Database.Database): void {
     CREATE TABLE IF NOT EXISTS sync_jobs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       job_type TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'RUNNING', 'SUCCESS', 'FAILED')),
+      status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'RUNNING', 'SUCCESS', 'FAILED', 'CANCELLED')),
       page_id INTEGER,
       started_at TEXT,
       finished_at TEXT,
@@ -142,6 +142,34 @@ export function runMigrations(sqlite: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS sync_jobs_status_idx ON sync_jobs (status);
     CREATE INDEX IF NOT EXISTS sync_jobs_job_type_idx ON sync_jobs (job_type);
+
+    CREATE TABLE IF NOT EXISTS lead_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lead_id INTEGER NOT NULL,
+      action TEXT NOT NULL,
+      old_value TEXT,
+      new_value TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (lead_id) REFERENCES leads (id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS lead_history_lead_id_idx ON lead_history (lead_id);
+    CREATE INDEX IF NOT EXISTS lead_history_created_at_idx ON lead_history (created_at);
+
+    CREATE TABLE IF NOT EXISTS sync_checkpoints (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      facebook_page_id TEXT NOT NULL,
+      stage TEXT NOT NULL,
+      posts_processed INTEGER NOT NULL DEFAULT 0,
+      comments_processed INTEGER NOT NULL DEFAULT 0,
+      leads_detected INTEGER NOT NULL DEFAULT 0,
+      completed_post_ids_json TEXT NOT NULL DEFAULT '[]',
+      cursor TEXT,
+      since TEXT,
+      last_error TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS sync_checkpoints_facebook_page_id_unique ON sync_checkpoints (facebook_page_id);
   `);
 
   ensureColumn(sqlite, 'leads', 'note', 'TEXT');
@@ -172,7 +200,8 @@ export function initializeDatabase(): DatabaseContext {
     return context;
   }
 
-  const databasePath = join(app.getPath('userData'), 'fsi.db');
+  const userDataDir = typeof app?.getPath === 'function' ? app.getPath('userData') : '.';
+  const databasePath = join(userDataDir, 'fsi.db');
   const sqlite = createSqliteDatabase(databasePath);
   runMigrations(sqlite);
   sqlite

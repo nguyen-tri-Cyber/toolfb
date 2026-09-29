@@ -1,7 +1,8 @@
 import { ipcMain } from 'electron';
+import { z } from 'zod';
 import {
   accessiblePagesSchema,
-  developmentTokenInputSchema,
+  developerTokenInputSchema,
   facebookPageRecordSchema,
   metaConnectionStatusSchema,
   pageSyncResultSchema,
@@ -14,6 +15,13 @@ import { metaService } from '../meta/meta.service';
 import { pageSyncService } from '../sync/page-sync.service';
 import { toSafeError } from './errors';
 
+declare const __IS_DEV__: boolean | undefined;
+
+function isDevelopmentMode(): boolean {
+  if (typeof __IS_DEV__ !== 'undefined') return __IS_DEV__;
+  return process.env.NODE_ENV !== 'production';
+}
+
 function metaSafeError(error: unknown) {
   const metaError = error instanceof MetaError ? error : toMetaError(error);
   console.error('Meta operation failed', {
@@ -24,7 +32,24 @@ function metaSafeError(error: unknown) {
   return toSafeError(metaError.code, toVietnameseMetaMessage(metaError.code));
 }
 
-export function registerMetaIpc(): void {
+export interface RegisterMetaIpcOptions {
+  isDev?: boolean;
+}
+
+export function registerMetaIpc(options: RegisterMetaIpcOptions = {}): void {
+  const isDev = options.isDev ?? isDevelopmentMode();
+
+  if (isDev) {
+    ipcMain.handle(IPC_CHANNELS.META_SET_DEVELOPER_TOKEN, async (_event, input: unknown) => {
+      try {
+        const { token } = developerTokenInputSchema.parse(input);
+        const data = metaConnectionStatusSchema.parse(await metaService.setDeveloperToken(token));
+        return safeResultSchema(metaConnectionStatusSchema).parse({ success: true, data });
+      } catch (error) {
+        return { success: false, error: metaSafeError(error) } as const;
+      }
+    });
+  }
   ipcMain.handle(IPC_CHANNELS.META_GET_CONNECTION_STATUS, () => {
     try {
       const data = metaConnectionStatusSchema.parse(metaService.getConnectionStatus());
@@ -34,10 +59,18 @@ export function registerMetaIpc(): void {
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.META_SAVE_DEVELOPMENT_TOKEN, (_event, input: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.META_CONNECT, async () => {
     try {
-      const { token } = developmentTokenInputSchema.parse(input);
-      const data = metaConnectionStatusSchema.parse(metaService.saveDevelopmentToken(token));
+      const data = metaConnectionStatusSchema.parse(await metaService.connect());
+      return safeResultSchema(metaConnectionStatusSchema).parse({ success: true, data });
+    } catch (error) {
+      return { success: false, error: metaSafeError(error) } as const;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.META_RECONNECT, async () => {
+    try {
+      const data = metaConnectionStatusSchema.parse(await metaService.reconnect());
       return safeResultSchema(metaConnectionStatusSchema).parse({ success: true, data });
     } catch (error) {
       return { success: false, error: metaSafeError(error) } as const;
@@ -84,9 +117,55 @@ export function registerMetaIpc(): void {
 
   ipcMain.handle(IPC_CHANNELS.META_SYNC_PAGE, async (_event, input: unknown) => {
     try {
-      const { pageId } = pageIdInputSchema.parse(input);
-      const data = pageSyncResultSchema.parse(await pageSyncService.syncOwnedPage(pageId));
+      const parsed = z
+        .object({
+          pageId: z.string().trim().regex(/^\d+$/, 'Facebook Page ID must be a numeric string.'),
+          resume: z.boolean().optional()
+        })
+        .parse(input);
+
+      const data = pageSyncResultSchema.parse(
+        await pageSyncService.syncOwnedPage(parsed.pageId, {
+          resume: parsed.resume,
+          onProgress: (progress) => {
+            try {
+              _event.sender.send(IPC_CHANNELS.META_SYNC_PROGRESS, progress);
+            } catch {
+              // sender window might be closed
+            }
+          }
+        })
+      );
       return safeResultSchema(pageSyncResultSchema).parse({ success: true, data });
+    } catch (error) {
+      return { success: false, error: metaSafeError(error) } as const;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.META_CANCEL_SYNC, (_event, input: unknown) => {
+    try {
+      const { pageId } = pageIdInputSchema.parse(input);
+      return { success: true, data: { cancelled: pageSyncService.cancelSync(pageId) } } as const;
+    } catch (error) {
+      return { success: false, error: metaSafeError(error) } as const;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.META_GET_SYNC_CHECKPOINT, (_event, input: unknown) => {
+    try {
+      const { pageId } = pageIdInputSchema.parse(input);
+      const checkpoint = pageSyncService.getSavedCheckpoint(pageId);
+      return { success: true, data: checkpoint } as const;
+    } catch (error) {
+      return { success: false, error: metaSafeError(error) } as const;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.META_DISCARD_CHECKPOINT, (_event, input: unknown) => {
+    try {
+      const { pageId } = pageIdInputSchema.parse(input);
+      pageSyncService.discardCheckpoint(pageId);
+      return { success: true, data: { discarded: true } } as const;
     } catch (error) {
       return { success: false, error: metaSafeError(error) } as const;
     }

@@ -63,7 +63,7 @@ The database is not stored inside the source tree.
 
 ## Current Phase
 
-Owned Page MVP — development-token build
+Owned Page MVP with production OAuth integration scaffolding
 
 Implemented:
 
@@ -75,15 +75,16 @@ Implemented:
 - Database-backed dashboard statistics
 - React Router navigation shell and Vietnamese desktop UI
 - Vietnamese application UI
-- Development-only Meta Access Token workflow
+- System-browser Meta OAuth flow through a separate broker
 - Secure encrypted token storage with Electron `safeStorage`
 - Meta Graph API client in the Electron main process
 - Accessible Facebook Page discovery
 - Local Facebook Page import and duplicate-safe upsert
 - Page post sync with bounded Graph API pagination and retry/backoff
 - Comment sync with duplicate-safe SQLite upsert
-- Incremental re-sync using a 7-day overlap from `lastSyncedAt`
-- Persistent sync jobs with SUCCESS/FAILED state and interrupted-job recovery
+- Incremental post re-sync using a 7-day overlap, plus comment rechecks on every stored post
+- Persistent sync jobs with SUCCESS/FAILED/CANCELLED state and interrupted-job recovery
+- Cooperative sync cancellation from the Pages screen; a new run safely upserts earlier results
 - Local Vietnamese rule-based lead detection without AI
 - Duplicate-safe lead creation from Facebook comments
 - Posts and Comments screens with search, Page filter, pagination, and source links
@@ -100,7 +101,7 @@ Implemented:
 The current build completes the core local value loop for Pages owned by the connected account:
 
 ```text
-Connect development token
+Connect Meta account
   -> import owned Page
   -> sync posts/comments
   -> detect lead intent locally
@@ -135,22 +136,22 @@ The Graph API version is centralized in:
 src/shared/constants/meta.ts
 ```
 
-### Development Token Workflow
+### Production OAuth Configuration
 
-For development and testing:
+The Electron app uses the system browser and a separate OAuth broker. The Meta App Secret must
+only be configured on the broker server. See [the deployment checklist](docs/meta-oauth.md).
 
-1. Create or open a Meta app in Meta for Developers.
-2. Use Graph API Explorer or the Meta developer tools to generate a User access token for a developer/test user.
-3. Add the `pages_show_list` permission. Depending on the Page fields available to your app and account, additional Page permissions may be required by Meta.
-4. Open FSI.
-5. Go to `Cài đặt` → `Kết nối Meta`.
-6. Paste the development Access Token.
-7. Click `Lưu Token`.
-8. Click `Kiểm tra kết nối`.
-9. Go to `Trang Facebook` and click `Kết nối Trang Facebook`.
-10. Import an accessible Page with `Thêm vào hệ thống`.
+1. Create a Meta app and configure Facebook Login with the exact HTTPS redirect URI
+   `https://your-auth-domain/oauth/callback`.
+2. Configure `META_APP_ID`, `META_APP_SECRET`, and `META_REDIRECT_URI` on the broker host.
+3. Put the broker behind HTTPS; run `npm run broker` as its application process.
+4. Set `META_OAUTH_BROKER_URL=https://your-auth-domain` when building Electron. The URL is
+   embedded in the main bundle. Local development may also set it at runtime.
+5. Complete Meta App Review/Advanced Access for the permissions used by the Owned Page MVP.
+6. Open FSI and complete the four onboarding steps.
 
-Never paste a real token into source code, README files, issue trackers, screenshots, or logs.
+The sample `.env.example` contains placeholders only. Do not put a real secret in the desktop
+build, source tree, issue tracker, screenshots, or logs.
 
 ### Token Storage
 
@@ -158,19 +159,21 @@ The renderer sends the token once through the typed preload API. The raw token i
 
 Token storage rules:
 
-- Stored with Electron `safeStorage.encryptString`.
+- Stored with Electron `safeStorage.encryptString` after OAuth completes.
 - Saved as encrypted bytes under Electron `userData`.
 - Not stored in SQLite.
 - Not returned to the renderer.
 - Not logged.
-- If `safeStorage` is unavailable, the app refuses to save the token and shows a Vietnamese error.
+- If `safeStorage` is unavailable, the app refuses to save the credential and shows a Vietnamese error.
 
 ### Current Limitations
 
-- Development token workflow only
-- Production Meta OAuth not implemented
+- Production Meta App credentials and an HTTPS broker deployment are still required
+- Live Meta OAuth and App Review have not been validated with a real Meta app yet
 - Production App Review/permission approval not completed
-- Current incremental post fetch uses a 7-day overlap. A brand-new comment added to a post older than that overlap can be missed until a broader recheck strategy is implemented.
+- Every sync rechecks comments on all stored posts, including posts outside the 7-day incremental window. This can take longer and use many Graph API requests for large Pages.
+- Graph API pagination limits remain (20 post pages and 50 comment pages per post by default). Reaching a limit fails the sync rather than marking it complete; large Pages still need a resumable cursor strategy.
+- Cancellation takes effect after the current Graph API request completes. Durable per-post progress and automatic resume after restart are not implemented yet.
 - Replies/advanced conversation threading are not a finished workflow.
 - Lead rules are currently built-in presets; end-user rule editing is not implemented.
 - CSV export is implemented; XLSX export is not.
